@@ -2,6 +2,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 
+from controller_manager.controller_manager_services import list_controllers
 from python_qt_binding import loadUi
 from python_qt_binding.QtCore import pyqtSignal, pyqtSlot, Qt
 from python_qt_binding.QtWidgets import QLabel, QSlider, QWidget
@@ -9,7 +10,7 @@ from qt_gui.plugin import Plugin
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Float64MultiArray, String
 from typing import List, Tuple
-from urdf_parser_py.urdf import URDF
+from urdf_parser_py import urdf
 
 class RqtJointGroupPositionCommander(Plugin):
 
@@ -17,7 +18,8 @@ class RqtJointGroupPositionCommander(Plugin):
     # This is necessary because slider values only allow integers and not floats.
     SLIDER_MULTIPLIER = 1000
 
-    _joints: URDF = None
+    _joints_claimed_by_controller: List[str] = []
+    _joints: List[urdf.Joint] = []
     _sliders: List[Tuple[QLabel, QSlider]] = []
 
     update_joints = pyqtSignal()
@@ -62,6 +64,16 @@ class RqtJointGroupPositionCommander(Plugin):
         self._robot_description_sub = context.node.create_subscription(
             String, '/robot_description', self._callback_robot_description, qos_profile)
 
+        # Configs (Get these from configuration dialog)
+        self._controller_manager = 'controller_manager'
+        self._controller = 'joint_group_position_controller'
+
+        for controller in list_controllers(context.node, self._controller_manager).controller:
+            for interface in controller.claimed_interfaces:
+                # Get joint name from interface (eg. 'joint_foo/position' -> 'joint_foo')
+                self._joints_claimed_by_controller.append(interface.split('/')[0])
+        self.update_joints.emit()
+
     def shutdown_plugin(self):
         # TODO unregister all publishers here
         pass
@@ -79,7 +91,7 @@ class RqtJointGroupPositionCommander(Plugin):
         self._cmd_pub.publish(msg)
 
     def _callback_robot_description(self, msg: String):
-        robot = URDF.from_xml_string(msg.data)
+        robot = urdf.URDF.from_xml_string(msg.data)
         self._joints = robot.joints
         self.update_joints.emit()
 
@@ -88,7 +100,8 @@ class RqtJointGroupPositionCommander(Plugin):
         self._sliders.clear()
         for joint in self._joints:
             if joint.type == 'revolute':
-                self._add_slider(joint.name, joint.limit.lower, joint.limit.upper)
+                if joint.name in self._joints_claimed_by_controller:
+                    self._add_slider(joint.name, joint.limit.lower, joint.limit.upper)
 
     def _add_slider(self, name: str, minimum: float, maximum: float):
         label = QLabel(name)

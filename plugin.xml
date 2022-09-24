@@ -1,0 +1,16 @@
+<library path="rqt_joint_group_position_commander">
+  <class type="rqt_joint_group_position_commander.rqt_joint_group_position_commander.RqtJointGroupPositionCommander"
+         base_class_type="rqt_gui_py::Plugin">
+    <description>Graphical frontend for interacting with a JointGroupPositionController</description>
+    <qtgui>
+      <group>
+        <label>Control</label>
+        <icon type="theme">folder</icon>
+        <statustip>Plugins related to Control.</statustip>
+      </group>
+      <label>Joint Group Position Controller</label>
+      <icon type="theme">image-x-generic</icon>
+      <statustip>Send Joint Group Position Controller commands</statustip>
+    </qtgui>
+  </class>
+</library>

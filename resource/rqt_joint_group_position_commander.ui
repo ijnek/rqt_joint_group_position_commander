@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Joint Group Position Commaner</string>
+   <string>Joint Group Position Commander</string>
   </property>
   <layout class="QFormLayout" name="formLayout"/>
  </widget>

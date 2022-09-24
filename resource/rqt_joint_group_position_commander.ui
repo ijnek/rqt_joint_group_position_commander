@@ -6,67 +6,14 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>217</width>
-    <height>122</height>
+    <width>400</width>
+    <height>300</height>
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Form</string>
+   <string>Joint Group Position Commaner</string>
   </property>
-  <widget class="QWidget" name="verticalLayoutWidget">
-   <property name="geometry">
-    <rect>
-     <x>0</x>
-     <y>10</y>
-     <width>211</width>
-     <height>101</height>
-    </rect>
-   </property>
-   <layout class="QVBoxLayout" name="verticalLayout">
-    <item>
-     <widget class="QSlider" name="slider_1">
-      <property name="minimum">
-       <number>-1000</number>
-      </property>
-      <property name="maximum">
-       <number>1000</number>
-      </property>
-      <property name="orientation">
-       <enum>Qt::Horizontal</enum>
-      </property>
-     </widget>
-    </item>
-    <item>
-     <widget class="QSlider" name="slider_2">
-      <property name="minimum">
-       <number>-1000</number>
-      </property>
-      <property name="maximum">
-       <number>1000</number>
-      </property>
-      <property name="orientation">
-       <enum>Qt::Horizontal</enum>
-      </property>
-     </widget>
-    </item>
-    <item>
-     <widget class="QSlider" name="slider_3">
-      <property name="minimum">
-       <number>-1000</number>
-      </property>
-      <property name="maximum">
-       <number>1000</number>
-      </property>
-      <property name="singleStep">
-       <number>1</number>
-      </property>
-      <property name="orientation">
-       <enum>Qt::Horizontal</enum>
-      </property>
-     </widget>
-    </item>
-   </layout>
-  </widget>
+  <layout class="QFormLayout" name="formLayout"/>
  </widget>
  <resources/>
  <connections/>

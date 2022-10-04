@@ -7,6 +7,7 @@ from python_qt_binding import loadUi
 from python_qt_binding.QtCore import pyqtSignal, pyqtSlot, Qt
 from python_qt_binding.QtWidgets import QLabel, QSlider, QWidget
 from qt_gui.plugin import Plugin
+from rclpy.logging import get_logger
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Float64MultiArray, String
 from typing import List, Tuple
@@ -23,6 +24,8 @@ class RqtJointGroupPositionCommander(Plugin):
     _sliders: List[Tuple[QLabel, QSlider]] = []
 
     update_joints = pyqtSignal()
+
+    _log = get_logger('rqt_joint_group_position_commander')
 
     def __init__(self, context):
         super().__init__(context)
@@ -58,16 +61,16 @@ class RqtJointGroupPositionCommander(Plugin):
             Float64MultiArray, '/joint_group_position_controller/commands', 1)
 
         # Create subscription
-        qos_profile = QoSProfile(depth=1)
-        qos_profile.durability = DurabilityPolicy.TRANSIENT_LOCAL
-        qos_profile.reliability = ReliabilityPolicy.RELIABLE
         self._robot_description_sub = context.node.create_subscription(
-            String, '/robot_description', self._callback_robot_description, qos_profile)
+            String, '/robot_description', self._callback_robot_description,
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
 
         # Configs (Get these from configuration dialog)
         self._controller_manager = 'controller_manager'
         self._controller = 'joint_group_position_controller'
 
+        # Get joints claimed by controller
+        self._log.debug('Get joints claimed by controller')
         for controller in list_controllers(context.node, self._controller_manager).controller:
             for interface in controller.claimed_interfaces:
                 # Get joint name from interface (eg. 'joint_foo/position' -> 'joint_foo')
@@ -91,12 +94,17 @@ class RqtJointGroupPositionCommander(Plugin):
         self._cmd_pub.publish(msg)
 
     def _callback_robot_description(self, msg: String):
+        self._log.debug('Received robot description')
         robot = urdf.URDF.from_xml_string(msg.data)
+
         self._joints = robot.joints
+        self._log.debug('Joints from URDF: ', self._joints)
+
         self.update_joints.emit()
 
     @pyqtSlot()
     def _update_sliders(self):
+        self._log.debug('Updating sliders')
         self._sliders.clear()
         for joint in self._joints:
             if joint.type == 'revolute':

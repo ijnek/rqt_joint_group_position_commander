@@ -8,10 +8,12 @@ from python_qt_binding.QtCore import pyqtSignal, pyqtSlot, Qt
 from python_qt_binding.QtWidgets import QLabel, QSlider, QWidget
 from qt_gui.plugin import Plugin
 from rclpy.logging import get_logger
-from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import DurabilityPolicy, QoSProfile
+from rqt_joint_group_position_commander.list_joints import list_joints
 from std_msgs.msg import Float64MultiArray, String
 from typing import List, Tuple
 from urdf_parser_py import urdf
+import time
 
 class RqtJointGroupPositionCommander(Plugin):
 
@@ -56,6 +58,9 @@ class RqtJointGroupPositionCommander(Plugin):
         # Connect signal
         self.update_joints.connect(self._update_sliders)
 
+        # No IDEA why this helps, remove it before merging.
+        time.sleep(1.0)
+
         # Create publisher
         self._cmd_pub = context.node.create_publisher(
             Float64MultiArray, '/joint_group_position_controller/commands', 1)
@@ -66,15 +71,15 @@ class RqtJointGroupPositionCommander(Plugin):
             QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
 
         # Configs (Get these from configuration dialog)
-        self._controller_manager = 'controller_manager'
-        self._controller = 'joint_group_position_controller'
+        controller_manager_name = 'controller_manager'
 
         # Get joints claimed by controller
-        self._log.debug('Get joints claimed by controller')
-        for controller in list_controllers(context.node, self._controller_manager).controller:
-            for interface in controller.claimed_interfaces:
-                # Get joint name from interface (eg. 'joint_foo/position' -> 'joint_foo')
-                self._joints_claimed_by_controller.append(interface.split('/')[0])
+        self._log.debug('Get controllers from controller manager.')
+        controllers = list_controllers(context.node, controller_manager_name)
+        self._log.debug('List joints claimed by controller.')
+        self._joints_claimed_by_controller = list_joints(controllers.controller)
+        self._log.debug('Found {} joints claimed by controllers: {}'.format(
+            len(self._joints_claimed_by_controller), self._joints_claimed_by_controller))
         self.update_joints.emit()
 
     def shutdown_plugin(self):
@@ -105,7 +110,12 @@ class RqtJointGroupPositionCommander(Plugin):
     @pyqtSlot()
     def _update_sliders(self):
         self._log.debug('Updating sliders')
+
+        # Clear out layout and empty list of sliders
+        for i in range(self._widget.layout().count()):
+            self._widget.layout().removeRow(0)
         self._sliders.clear()
+
         for joint in self._joints:
             if joint.type == 'revolute':
                 if joint.name in self._joints_claimed_by_controller:

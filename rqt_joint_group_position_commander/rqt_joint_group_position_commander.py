@@ -98,7 +98,7 @@ class RqtJointGroupPositionCommander(Plugin):
         robot = urdf.URDF.from_xml_string(msg.data)
 
         self._joints = robot.joints
-        self._log.debug('Joints from URDF: ', self._joints)
+        self._log.debug('Found {0} joints from URDF.'.format(len(self._joints)))
 
         self.update_joints.emit()
 

@@ -2,14 +2,17 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 
+from controller_manager_msgs.srv import ListControllers
 from controller_manager.controller_manager_services import list_controllers
 from python_qt_binding import loadUi
-from python_qt_binding.QtCore import pyqtSignal, pyqtSlot, Qt
+from python_qt_binding.QtCore import pyqtSignal, pyqtSlot, Qt, QTimer, Slot
 from python_qt_binding.QtWidgets import QLabel, QSlider, QWidget
 from qt_gui.plugin import Plugin
+from rclpy import spin_until_future_complete
 from rclpy.logging import get_logger
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from rqt_joint_group_position_commander.list_joints import list_joints
+from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray, String
 from typing import List, Tuple
 from urdf_parser_py import urdf
@@ -58,9 +61,6 @@ class RqtJointGroupPositionCommander(Plugin):
         # Connect signal
         self.update_joints.connect(self._update_sliders)
 
-        # No IDEA why this helps, remove it before merging.
-        time.sleep(1.0)
-
         # Create publisher
         self._cmd_pub = context.node.create_publisher(
             Float64MultiArray, '/joint_group_position_controller/commands', 1)
@@ -70,17 +70,27 @@ class RqtJointGroupPositionCommander(Plugin):
             String, '/robot_description', self._callback_robot_description,
             QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
 
+        self._joint_state_sub = context.node.create_subscription(
+            JointState, '/joint_states', self._callback_joint_states, 1)
+
         # Configs (Get these from configuration dialog)
         controller_manager_name = 'controller_manager'
 
         # Get joints claimed by controller
-        self._log.debug('Get controllers from controller manager.')
-        controllers = list_controllers(context.node, controller_manager_name)
+        client = context.node.create_client(ListControllers, '/controller_manager/list_controllers')
+        while not client.wait_for_service(timeout_sec=1.0):
+            self._log.debug('List Controller service not available, waiting again...')
+        self.future = client.call_async(ListControllers.Request())
+        spin_until_future_complete(context.node, self.future)
+        controllers = self.future.result()
+        client.destroy()
         self._log.debug('List joints claimed by controller.')
         self._joints_claimed_by_controller = list_joints(controllers.controller)
         self._log.debug('Found {} joints claimed by controllers: {}'.format(
             len(self._joints_claimed_by_controller), self._joints_claimed_by_controller))
-        self.update_joints.emit()
+        # self.update_joints.emit()
+
+        self._log.debug('Constructed RqtJointGroupPositionCommander.')
 
     def shutdown_plugin(self):
         # TODO unregister all publishers here
@@ -94,8 +104,22 @@ class RqtJointGroupPositionCommander(Plugin):
 
     def publish(self):
         msg = Float64MultiArray()
+
         for slider in self._sliders:
-            msg.data.append(float(slider.value()) / self.SLIDER_MULTIPLIER)
+            msg.data.append(float(slider[1].value()) / self.SLIDER_MULTIPLIER)
+
+        # for slider in self._sliders:
+        #     if slider[0].text() == 'base_link__arm1':
+        #         msg.data.append(float(slider[1].value()) / self.SLIDER_MULTIPLIER)
+
+        # for slider in self._sliders:
+        #     if slider[0].text() == 'arm1__arm2':
+        #         msg.data.append(float(slider[1].value()) / self.SLIDER_MULTIPLIER)
+
+        # for slider in self._sliders:
+        #     if slider[0].text() == 'arm2__brush':
+        #         msg.data.append(float(slider[1].value()) / self.SLIDER_MULTIPLIER)
+
         self._cmd_pub.publish(msg)
 
     def _callback_robot_description(self, msg: String):
@@ -107,15 +131,35 @@ class RqtJointGroupPositionCommander(Plugin):
 
         self.update_joints.emit()
 
+    def _callback_joint_states(self, msg: JointState):
+        self._log.debug('Received joint states.')
+
+        # If sliders aren't initialized, don't update them
+        if not self._sliders:
+            return
+
+        self._log.debug('Applying joint states to slider positions.')
+        for i, joint in enumerate(msg.name):
+            for slider in self._sliders:
+                if slider[0].text() == joint:
+                    self._log.debug('Updating slider for joint {}'.format(joint))
+                    slider[1].blockSignals(True)
+                    slider[1].setValue(msg.position[i] * self.SLIDER_MULTIPLIER)
+                    slider[1].blockSignals(False)
+
+        self._log.debug('Destroying joint states subscriber')
+        self._joint_state_sub.destroy()
+
     @pyqtSlot()
     def _update_sliders(self):
         self._log.debug('Updating sliders')
 
         # Clear out layout and empty list of sliders
         for i in range(self._widget.layout().count()):
-            self._widget.layout().removeRow(0)
+            self._widget.layout().removeRow(i)
         self._sliders.clear()
 
+        # print(self._joints)
         for joint in self._joints:
             if joint.type == 'revolute':
                 if joint.name in self._joints_claimed_by_controller:
@@ -130,4 +174,4 @@ class RqtJointGroupPositionCommander(Plugin):
         slider.valueChanged.connect(self.publish)
 
         self._widget.layout().addRow(label, slider)
-        self._sliders.append(slider)
+        self._sliders.append((label, slider))

@@ -3,13 +3,13 @@ import os
 from ament_index_python.packages import get_package_share_directory
 
 from controller_manager_msgs.srv import ListControllers
-from controller_manager.controller_manager_services import list_controllers
 from python_qt_binding import loadUi
-from python_qt_binding.QtCore import pyqtSignal, pyqtSlot, Qt, QTimer, Slot
+from python_qt_binding.QtCore import pyqtSignal, pyqtSlot, Qt
 from python_qt_binding.QtWidgets import QLabel, QSlider, QWidget
 from qt_gui.plugin import Plugin
-from qt_gui.plugin_context import PluginContext
-from rclpy import spin_until_future_complete
+from rqt_gui.ros2_plugin_context import Ros2PluginContext
+
+from rclpy import ok
 from rclpy.logging import get_logger
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from rqt_joint_group_position_commander.list_joints import list_joints
@@ -28,7 +28,7 @@ class RqtJointGroupPositionCommander(Plugin):
     _joints_claimed_by_controller: List[str] = []
     _joints: List[urdf.Joint] = []
     _sliders: List[Tuple[QLabel, QSlider]] = []
-    _context: PluginContext
+    _context: Ros2PluginContext
     _widget: QWidget
 
     update_joints = pyqtSignal()
@@ -76,18 +76,36 @@ class RqtJointGroupPositionCommander(Plugin):
 
     def trigger_configuration(self):
         self._log.debug('Opening configuration dialog')
+
+        self._log.debug('Create client')
         client = self._context.node.create_client(ListControllers, '/controller_manager/list_controllers')
+
+        self._log.debug('Wait for service to be available.')
         while not client.wait_for_service(timeout_sec=1.0):
             self._log.debug('List Controller service not available, waiting again...')
-        self.future = client.call_async(ListControllers.Request())
-        spin_until_future_complete(self._context.node, self.future)
-        controllers = self.future.result()
+
+        self._log.debug('Service available, sending request')
+        future = client.call_async(ListControllers.Request())
+
+        self._log.debug('Waiting for response...')
+        while ok() and not future.done():
+            pass
+
+        if future.result() is None:
+            self._log.warning('Could not call list_controllers service.')
+
+        self._log.debug('Obtained a valid response')
+        controllers = future.result()
+
+        self._log.debug('Destroying service client')
         client.destroy()
+
         self._log.debug('List joints claimed by controller')
         self._joints_claimed_by_controller = list_joints(controllers.controller)
         self._log.debug('Found {} joints claimed by controllers: {}'.format(
             len(self._joints_claimed_by_controller), self._joints_claimed_by_controller))
         self._update_sliders()
+        self._log.debug('Closing configuration dialog')
 
     def _add_widget(self, context):
         # Create QWidget and extend it with all the attributes and children
@@ -117,18 +135,6 @@ class RqtJointGroupPositionCommander(Plugin):
 
         for slider in self._sliders:
             msg.data.append(float(slider[1].value()) / self.SLIDER_MULTIPLIER)
-
-        # for slider in self._sliders:
-        #     if slider[0].text() == 'base_link__arm1':
-        #         msg.data.append(float(slider[1].value()) / self.SLIDER_MULTIPLIER)
-
-        # for slider in self._sliders:
-        #     if slider[0].text() == 'arm1__arm2':
-        #         msg.data.append(float(slider[1].value()) / self.SLIDER_MULTIPLIER)
-
-        # for slider in self._sliders:
-        #     if slider[0].text() == 'arm2__brush':
-        #         msg.data.append(float(slider[1].value()) / self.SLIDER_MULTIPLIER)
 
         self._cmd_pub.publish(msg)
 

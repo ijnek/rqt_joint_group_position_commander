@@ -77,27 +77,27 @@ class RqtJointGroupPositionCommander(Plugin):
     def trigger_configuration(self):
         self._log.debug('Opening configuration dialog')
 
-        self._log.debug('Create client')
+        self._log.debug('Create ListControllers client')
         client = self._context.node.create_client(ListControllers, '/controller_manager/list_controllers')
 
-        self._log.debug('Wait for service to be available.')
+        self._log.debug('Wait for ListControllers service to be available.')
         while not client.wait_for_service(timeout_sec=1.0):
-            self._log.debug('List Controller service not available, waiting again...')
+            self._log.debug('ListControllers service not available, waiting again...')
 
-        self._log.debug('Service available, sending request')
+        self._log.debug('ListControllers service available, sending request')
         future = client.call_async(ListControllers.Request())
 
-        self._log.debug('Waiting for response...')
+        self._log.debug('Waiting for ListControllers response...')
         while ok() and not future.done():
             pass
 
         if future.result() is None:
-            self._log.warning('Could not call list_controllers service.')
+            self._log.warning('Could not call ListControllers service.')
 
-        self._log.debug('Obtained a valid response')
+        self._log.debug('Obtained a valid ListControllers response')
         controllers = future.result()
 
-        self._log.debug('Destroying service client')
+        self._log.debug('Destroying ListControllers service client')
         client.destroy()
 
         self._log.debug('List joints claimed by controller')

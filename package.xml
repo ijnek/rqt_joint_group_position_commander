@@ -7,7 +7,10 @@
   <maintainer email="kenjibrameld@gmail.com">root</maintainer>
   <license>Apache License 2.0</license>
 
+  <exec_depend>controller_manager_msgs</exec_depend>
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
   <exec_depend>urdfdom_py</exec_depend>
 
   <test_depend>ament_copyright</test_depend>

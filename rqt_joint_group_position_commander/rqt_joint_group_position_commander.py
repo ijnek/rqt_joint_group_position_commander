@@ -2,16 +2,22 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 
-from controller_manager.controller_manager_services import list_controllers
+from controller_manager_msgs.srv import ListControllers
 from python_qt_binding import loadUi
 from python_qt_binding.QtCore import pyqtSignal, pyqtSlot, Qt
 from python_qt_binding.QtWidgets import QLabel, QSlider, QWidget
 from qt_gui.plugin import Plugin
+from rqt_gui.ros2_plugin_context import Ros2PluginContext
+
+from rclpy import ok
 from rclpy.logging import get_logger
-from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import DurabilityPolicy, QoSProfile
+from rqt_joint_group_position_commander.list_joints import list_joints
+from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray, String
 from typing import List, Tuple
 from urdf_parser_py import urdf
+import time
 
 class RqtJointGroupPositionCommander(Plugin):
 
@@ -22,6 +28,8 @@ class RqtJointGroupPositionCommander(Plugin):
     _joints_claimed_by_controller: List[str] = []
     _joints: List[urdf.Joint] = []
     _sliders: List[Tuple[QLabel, QSlider]] = []
+    _context: Ros2PluginContext
+    _widget: QWidget
 
     update_joints = pyqtSignal()
 
@@ -31,6 +39,75 @@ class RqtJointGroupPositionCommander(Plugin):
         super().__init__(context)
         self.setObjectName("RqtJointGroupPositionCommander")
 
+        self._context = context
+
+        # Add widget
+        self._add_widget(context)
+
+        # Connect signal
+        self.update_joints.connect(self._update_sliders)
+
+        # Create publisher
+        self._cmd_pub = context.node.create_publisher(
+            Float64MultiArray, '/joint_group_position_controller/commands', 1)
+
+        # Create subscription
+        self._robot_description_sub = context.node.create_subscription(
+            String, '/robot_description', self._callback_robot_description,
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+
+        self._joint_state_sub = context.node.create_subscription(
+            JointState, '/joint_states', self._callback_joint_states, 1)
+
+        # Configs (Get these from configuration dialog)
+        controller_manager_name = 'controller_manager'
+
+        self._log.debug('Constructed RqtJointGroupPositionCommander')
+
+    def shutdown_plugin(self):
+        # TODO unregister all publishers here
+        pass
+
+    def save_settings(self, plugin_settings, instance_settings):
+        pass
+
+    def restore_settings(self, plugin_settings, instance_settings):
+        pass
+
+    def trigger_configuration(self):
+        self._log.debug('Opening configuration dialog')
+
+        self._log.debug('Create ListControllers client')
+        client = self._context.node.create_client(ListControllers, '/controller_manager/list_controllers')
+
+        self._log.debug('Wait for ListControllers service to be available.')
+        while not client.wait_for_service(timeout_sec=1.0):
+            self._log.debug('ListControllers service not available, waiting again...')
+
+        self._log.debug('ListControllers service available, sending request')
+        future = client.call_async(ListControllers.Request())
+
+        self._log.debug('Waiting for ListControllers response...')
+        while ok() and not future.done():
+            pass
+
+        if future.result() is None:
+            self._log.warning('Could not call ListControllers service.')
+
+        self._log.debug('Obtained a valid ListControllers response')
+        controllers = future.result()
+
+        self._log.debug('Destroying ListControllers service client')
+        client.destroy()
+
+        self._log.debug('List joints claimed by controller')
+        self._joints_claimed_by_controller = list_joints(controllers.controller)
+        self._log.debug('Found {} joints claimed by controllers: {}'.format(
+            len(self._joints_claimed_by_controller), self._joints_claimed_by_controller))
+        self._update_sliders()
+        self._log.debug('Closing configuration dialog')
+
+    def _add_widget(self, context):
         # Create QWidget and extend it with all the attributes and children
         # from the UI file
         self._widget = QWidget()
@@ -53,44 +130,12 @@ class RqtJointGroupPositionCommander(Plugin):
         # Add widget to the user interface
         context.add_widget(self._widget)
 
-        # Connect signal
-        self.update_joints.connect(self._update_sliders)
-
-        # Create publisher
-        self._cmd_pub = context.node.create_publisher(
-            Float64MultiArray, '/joint_group_position_controller/commands', 1)
-
-        # Create subscription
-        self._robot_description_sub = context.node.create_subscription(
-            String, '/robot_description', self._callback_robot_description,
-            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
-
-        # Configs (Get these from configuration dialog)
-        self._controller_manager = 'controller_manager'
-        self._controller = 'joint_group_position_controller'
-
-        # Get joints claimed by controller
-        self._log.debug('Get joints claimed by controller')
-        for controller in list_controllers(context.node, self._controller_manager).controller:
-            for interface in controller.claimed_interfaces:
-                # Get joint name from interface (eg. 'joint_foo/position' -> 'joint_foo')
-                self._joints_claimed_by_controller.append(interface.split('/')[0])
-        self.update_joints.emit()
-
-    def shutdown_plugin(self):
-        # TODO unregister all publishers here
-        pass
-
-    def save_settings(self, plugin_settings, instance_settings):
-        pass
-
-    def restore_settings(self, plugin_settings, instance_settings):
-        pass
-
     def publish(self):
         msg = Float64MultiArray()
+
         for slider in self._sliders:
-            msg.data.append(float(slider.value()) / self.SLIDER_MULTIPLIER)
+            msg.data.append(float(slider[1].value()) / self.SLIDER_MULTIPLIER)
+
         self._cmd_pub.publish(msg)
 
     def _callback_robot_description(self, msg: String):
@@ -98,18 +143,45 @@ class RqtJointGroupPositionCommander(Plugin):
         robot = urdf.URDF.from_xml_string(msg.data)
 
         self._joints = robot.joints
-        self._log.debug('Found {0} joints from URDF.'.format(len(self._joints)))
+        self._log.debug('Found {0} joints from URDF'.format(len(self._joints)))
 
         self.update_joints.emit()
+
+    def _callback_joint_states(self, msg: JointState):
+        self._log.debug('Received joint states')
+
+        # If sliders aren't initialized, don't update them
+        if not self._sliders:
+            return
+
+        self._log.debug('Applying joint states to slider positions')
+        for i, joint in enumerate(msg.name):
+            for slider in self._sliders:
+                if slider[0].text() == joint:
+                    self._log.debug('Updating slider for joint {}'.format(joint))
+                    slider[1].blockSignals(True)
+                    slider[1].setValue(msg.position[i] * self.SLIDER_MULTIPLIER)
+                    slider[1].blockSignals(False)
+
+        self._log.debug('Destroying joint states subscriber')
+        self._joint_state_sub.destroy()
 
     @pyqtSlot()
     def _update_sliders(self):
         self._log.debug('Updating sliders')
-        self._sliders.clear()
+
+        # Clear out layout and empty list of sliders
+        self._context.remove_widget(self._widget)
+        self._add_widget(self._context)
+
+        self._sliders = []
+
         for joint in self._joints:
             if joint.type == 'revolute':
                 if joint.name in self._joints_claimed_by_controller:
                     self._add_slider(joint.name, joint.limit.lower, joint.limit.upper)
+
+        self._log.debug('Finished updating sliders')
 
     def _add_slider(self, name: str, minimum: float, maximum: float):
         label = QLabel(name)
@@ -120,4 +192,4 @@ class RqtJointGroupPositionCommander(Plugin):
         slider.valueChanged.connect(self.publish)
 
         self._widget.layout().addRow(label, slider)
-        self._sliders.append(slider)
+        self._sliders.append((label, slider))

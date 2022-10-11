@@ -174,7 +174,8 @@ class RqtJointGroupPositionCommander(Plugin):
         self._context.remove_widget(self._widget)
         self._add_widget(self._context)
 
-        # print(self._joints)
+        self._sliders = []
+
         for joint in self._joints:
             if joint.type == 'revolute':
                 if joint.name in self._joints_claimed_by_controller:
